@@ -313,6 +313,8 @@ namespace Microsoft.Data.Entity.Metadata.Internal
 
             if (Metadata.ReferencedProperties.SequenceEqual(properties))
             {
+                var principalEntityTypeBuilder = ModelBuilder.Entity(Metadata.ReferencedEntityType.Name, configurationSource);
+                principalEntityTypeBuilder.Key(properties, configurationSource);
                 _referencedKeyConfigurationSource = configurationSource.Max(_referencedKeyConfigurationSource);
                 return this;
             }

@@ -89,6 +89,84 @@ namespace Microsoft.Data.Entity.Metadata.Internal
 
             Assert.Null(foreignKeyBuilder);
         }
+        
+        [Fact]
+        public void Can_only_remove_lower_or_equal_source_foreign_key()
+        {
+            var modelBuilder = CreateModelBuilder();
+            modelBuilder
+                .Entity(typeof(Customer), ConfigurationSource.Explicit)
+                .PrimaryKey(new[] { Customer.IdProperty, Customer.UniqueProperty }, ConfigurationSource.Explicit);
+            var entityBuilder = modelBuilder.Entity(typeof(Order), ConfigurationSource.Explicit);
+
+            var fk = entityBuilder.ForeignKey(typeof(Customer).FullName, new[] { Order.CustomerIdProperty.Name , Order.CustomerUniqueProperty.Name }, ConfigurationSource.DataAnnotation);
+            Assert.NotNull(fk);
+
+            Assert.Null(entityBuilder.RemoveRelationship(fk.Metadata, ConfigurationSource.Convention));
+            Assert.Equal(ConfigurationSource.DataAnnotation, entityBuilder.RemoveRelationship(fk.Metadata, ConfigurationSource.DataAnnotation));
+
+            Assert.Equal(
+                new[] { Order.CustomerIdProperty.Name, Order.CustomerUniqueProperty.Name },
+                entityBuilder.Metadata.Properties.Select(p => p.Name));
+            Assert.Empty(entityBuilder.Metadata.ForeignKeys);
+        }
+
+        [Fact]
+        public void Removing_foreign_key_removes_unused_contained_shadow_properties()
+        {
+            var modelBuilder = CreateModelBuilder();
+            modelBuilder
+                .Entity(typeof(Customer), ConfigurationSource.Explicit)
+                .PrimaryKey(new[] { Customer.IdProperty, Customer.UniqueProperty }, ConfigurationSource.Explicit);
+            var entityBuilder = modelBuilder.Entity(typeof(Order), ConfigurationSource.Explicit);
+            var shadowProperty = entityBuilder.Property(typeof(Guid), "Shadow", ConfigurationSource.Convention);
+
+            var fk = entityBuilder.ForeignKey(typeof(Customer).FullName, new[] { Order.CustomerIdProperty.Name, shadowProperty.Metadata.Name }, ConfigurationSource.Convention);
+            Assert.NotNull(fk);
+
+            Assert.Equal(ConfigurationSource.Convention, entityBuilder.RemoveRelationship(fk.Metadata, ConfigurationSource.DataAnnotation));
+
+            Assert.Same(Order.CustomerIdProperty.Name, entityBuilder.Metadata.Properties.Single().Name);
+            Assert.Empty(entityBuilder.Metadata.ForeignKeys);
+        }
+
+        [Fact]
+        public void Removing_foreign_key_does_not_remove_contained_shadow_properties_if_referenced_elsewhere()
+        {
+            Test_removing_foreign_key_does_not_remove_contained_shadow_properties_if_referenced_elsewhere(
+                (entityBuilder, property) => entityBuilder.PrimaryKey(new[] { property.Name }, ConfigurationSource.Convention));
+
+            Test_removing_foreign_key_does_not_remove_contained_shadow_properties_if_referenced_elsewhere(
+                (entityBuilder, property) => entityBuilder.Index(new[] { property.Name }, ConfigurationSource.Convention));
+
+            Test_removing_foreign_key_does_not_remove_contained_shadow_properties_if_referenced_elsewhere(
+                (entityBuilder, property) => entityBuilder.ForeignKey(
+                    typeof(Customer).FullName,
+                    new[] { entityBuilder.Property(typeof(int), "Shadow2", ConfigurationSource.Convention).Metadata.Name, property.Name },
+                    ConfigurationSource.Convention));
+
+            Test_removing_foreign_key_does_not_remove_contained_shadow_properties_if_referenced_elsewhere(
+               (entityBuilder, property) => entityBuilder.Property(typeof(Guid), "Shadow", ConfigurationSource.Explicit));
+        }
+
+        private void Test_removing_foreign_key_does_not_remove_contained_shadow_properties_if_referenced_elsewhere(Func<InternalEntityBuilder, Property, object> shadowConfig)
+        {
+            var modelBuilder = CreateModelBuilder();
+            modelBuilder
+                .Entity(typeof(Customer), ConfigurationSource.Explicit)
+                .PrimaryKey(new[] { Customer.IdProperty, Customer.UniqueProperty }, ConfigurationSource.Explicit);
+            var entityBuilder = modelBuilder.Entity(typeof(Order), ConfigurationSource.Explicit);
+            var shadowProperty = entityBuilder.Property(typeof(Guid), "Shadow", ConfigurationSource.Convention);
+            Assert.NotNull(shadowConfig(entityBuilder, shadowProperty.Metadata));
+
+            var fk = entityBuilder.ForeignKey(typeof(Customer).FullName, new[] { Order.CustomerIdProperty.Name, shadowProperty.Metadata.Name }, ConfigurationSource.Convention);
+            Assert.NotNull(fk);
+
+            Assert.Equal(ConfigurationSource.Convention, entityBuilder.RemoveRelationship(fk.Metadata, ConfigurationSource.DataAnnotation));
+
+            Assert.Equal(1, entityBuilder.Metadata.Properties.Count(p => p.Name == shadowProperty.Metadata.Name));
+            Assert.Empty(entityBuilder.Metadata.ForeignKeys.Where(foreignKey => foreignKey.Properties.SequenceEqual(fk.Metadata.Properties)));
+        }
 
         [Fact]
         public void Index_returns_same_instance_for_clr_properties()
@@ -132,6 +210,79 @@ namespace Microsoft.Data.Entity.Metadata.Internal
             entityBuilder.Ignore(Order.CustomerIdProperty.Name, ConfigurationSource.DataAnnotation);
 
             Assert.Null(entityBuilder.Index(new[] { Order.IdProperty.Name, Order.CustomerIdProperty.Name }, ConfigurationSource.Convention));
+        }
+
+        [Fact]
+        public void Can_only_remove_lower_or_equal_source_index()
+        {
+            var modelBuilder = CreateModelBuilder();
+            modelBuilder
+                .Entity(typeof(Customer), ConfigurationSource.Explicit)
+                .PrimaryKey(new[] { Customer.IdProperty, Customer.UniqueProperty }, ConfigurationSource.Explicit);
+            var entityBuilder = modelBuilder.Entity(typeof(Order), ConfigurationSource.Explicit);
+
+            var index = entityBuilder.Index(new[] { Order.CustomerIdProperty.Name }, ConfigurationSource.DataAnnotation);
+            Assert.NotNull(index);
+
+            Assert.Null(entityBuilder.RemoveIndex(index.Metadata, ConfigurationSource.Convention));
+            Assert.Equal(ConfigurationSource.DataAnnotation, entityBuilder.RemoveIndex(index.Metadata, ConfigurationSource.DataAnnotation));
+
+            Assert.Equal(Order.CustomerIdProperty.Name, entityBuilder.Metadata.Properties.Single().Name);
+            Assert.Empty(entityBuilder.Metadata.Indexes);
+        }
+
+        [Fact]
+        public void Removing_index_removes_unused_contained_shadow_properties()
+        {
+            var modelBuilder = CreateModelBuilder();
+            var entityBuilder = modelBuilder.Entity(typeof(Order), ConfigurationSource.Explicit);
+            var shadowProperty = entityBuilder.Property(typeof(Guid), "Shadow", ConfigurationSource.Convention);
+            
+            var index = entityBuilder.Index(new[] { Order.CustomerIdProperty.Name, shadowProperty.Metadata.Name }, ConfigurationSource.Convention);
+            Assert.NotNull(index);
+
+            Assert.Equal(ConfigurationSource.Convention, entityBuilder.RemoveIndex(index.Metadata, ConfigurationSource.DataAnnotation));
+
+            Assert.Equal(Order.CustomerIdProperty.Name, entityBuilder.Metadata.Properties.Single().Name);
+            Assert.Empty(entityBuilder.Metadata.Indexes);
+        }
+
+        [Fact]
+        public void Removing_index_does_not_remove_contained_shadow_properties_if_referenced_elsewhere()
+        {
+            Test_removing_index_does_not_remove_contained_shadow_properties_if_referenced_elsewhere(
+                (entityBuilder, property) => entityBuilder.PrimaryKey(new[] { property.Name }, ConfigurationSource.Convention));
+
+            Test_removing_index_does_not_remove_contained_shadow_properties_if_referenced_elsewhere(
+                (entityBuilder, property) => entityBuilder.Index(new[] { property.Name }, ConfigurationSource.Convention));
+
+            Test_removing_index_does_not_remove_contained_shadow_properties_if_referenced_elsewhere(
+                (entityBuilder, property) => entityBuilder.ForeignKey(
+                    typeof(Customer).FullName,
+                    new[] { Order.CustomerIdProperty.Name, property.Name },
+                    ConfigurationSource.Convention));
+
+            Test_removing_index_does_not_remove_contained_shadow_properties_if_referenced_elsewhere(
+               (entityBuilder, property) => entityBuilder.Property(property.PropertyType, property.Name, ConfigurationSource.Explicit));
+        }
+
+        private void Test_removing_index_does_not_remove_contained_shadow_properties_if_referenced_elsewhere(Func<InternalEntityBuilder, Property, object> shadowConfig)
+        {
+            var modelBuilder = CreateModelBuilder();
+            modelBuilder
+                .Entity(typeof(Customer), ConfigurationSource.Explicit)
+                .PrimaryKey(new[] { Customer.IdProperty, Customer.UniqueProperty }, ConfigurationSource.Explicit);
+            var entityBuilder = modelBuilder.Entity(typeof(Order), ConfigurationSource.Explicit);
+            var shadowProperty = entityBuilder.Property(typeof(Guid), "Shadow", ConfigurationSource.Convention);
+            Assert.NotNull(shadowConfig(entityBuilder, shadowProperty.Metadata));
+
+            var index = entityBuilder.Index(new[] { Order.CustomerIdProperty.Name, shadowProperty.Metadata.Name }, ConfigurationSource.Convention);
+            Assert.NotNull(index);
+
+            Assert.Equal(ConfigurationSource.Convention, entityBuilder.RemoveIndex(index.Metadata, ConfigurationSource.DataAnnotation));
+
+            Assert.Equal(1, entityBuilder.Metadata.Properties.Count(p => p.Name == shadowProperty.Metadata.Name));
+            Assert.Empty(entityBuilder.Metadata.Indexes.Where(i => i.Properties.SequenceEqual(index.Metadata.Properties)));
         }
 
         [Fact]
@@ -221,6 +372,120 @@ namespace Microsoft.Data.Entity.Metadata.Internal
             entityBuilder.Ignore(Order.CustomerIdProperty.Name, ConfigurationSource.DataAnnotation);
 
             Assert.Null(entityBuilder.Key(new[] { Order.IdProperty.Name, Order.CustomerIdProperty.Name }, ConfigurationSource.Convention));
+        }
+
+        [Fact]
+        public void Can_only_remove_lower_or_equal_source_key()
+        {
+            var modelBuilder = CreateModelBuilder();
+            var entityBuilder = modelBuilder.Entity(typeof(Order), ConfigurationSource.Explicit);
+
+            var key = entityBuilder.Key(new[] { Order.CustomerIdProperty.Name }, ConfigurationSource.DataAnnotation);
+            Assert.NotNull(key);
+
+            Assert.Null( entityBuilder.RemoveKey(key.Metadata, ConfigurationSource.Convention));
+            Assert.Equal(ConfigurationSource.DataAnnotation, entityBuilder.RemoveKey(key.Metadata, ConfigurationSource.DataAnnotation));
+
+            Assert.Equal(Order.CustomerIdProperty.Name, entityBuilder.Metadata.Properties.Single().Name);
+            Assert.Empty(entityBuilder.Metadata.Keys);
+        }
+
+        [Fact]
+        public void Removing_key_removes_unused_contained_shadow_properties()
+        {
+            var modelBuilder = CreateModelBuilder();
+            var entityBuilder = modelBuilder.Entity(typeof(Order), ConfigurationSource.Explicit);
+            var shadowProperty = entityBuilder.Property(typeof(Guid), "Shadow", ConfigurationSource.Convention);
+
+            var key = entityBuilder.Key(new[] { Order.CustomerIdProperty.Name, shadowProperty.Metadata.Name }, ConfigurationSource.Convention);
+            Assert.NotNull(key);
+
+            Assert.Equal(ConfigurationSource.Convention, entityBuilder.RemoveKey(key.Metadata, ConfigurationSource.DataAnnotation));
+
+            Assert.Equal(Order.CustomerIdProperty.Name, entityBuilder.Metadata.Properties.Single().Name);
+            Assert.Empty(entityBuilder.Metadata.Keys);
+        }
+
+        [Fact]
+        public void Removing_key_does_not_remove_contained_shadow_properties_if_referenced_elsewhere()
+        {
+            Test_removing_key_does_not_remove_contained_shadow_properties_if_referenced_elsewhere(
+                (entityBuilder, property) => entityBuilder.PrimaryKey(
+                    new[] { entityBuilder.Property(typeof(int), "Shadow2", ConfigurationSource.Convention).Metadata.Name,
+                        property.Name }, ConfigurationSource.Convention));
+
+            Test_removing_key_does_not_remove_contained_shadow_properties_if_referenced_elsewhere(
+                (entityBuilder, property) => entityBuilder.Index(new[] { property.Name }, ConfigurationSource.Convention));
+
+            Test_removing_key_does_not_remove_contained_shadow_properties_if_referenced_elsewhere(
+                (entityBuilder, property) => entityBuilder.ForeignKey(
+                    typeof(Customer).FullName,
+                    new[] { Order.CustomerIdProperty.Name, property.Name },
+                    ConfigurationSource.Convention));
+
+            Test_removing_key_does_not_remove_contained_shadow_properties_if_referenced_elsewhere(
+               (entityBuilder, property) => entityBuilder.Property(typeof(Guid), "Shadow", ConfigurationSource.Explicit));
+        }
+
+        private void Test_removing_key_does_not_remove_contained_shadow_properties_if_referenced_elsewhere(Func<InternalEntityBuilder, Property, object> shadowConfig)
+        {
+            var modelBuilder = CreateModelBuilder();
+            modelBuilder
+                .Entity(typeof(Customer), ConfigurationSource.Explicit)
+                .PrimaryKey(new[] { Customer.IdProperty, Customer.UniqueProperty }, ConfigurationSource.Explicit);
+            var entityBuilder = modelBuilder.Entity(typeof(Order), ConfigurationSource.Explicit);
+            var shadowProperty = entityBuilder.Property(typeof(Guid), "Shadow", ConfigurationSource.Convention);
+            Assert.NotNull(shadowConfig(entityBuilder, shadowProperty.Metadata));
+
+            var key = entityBuilder.Key(new[] { Order.CustomerIdProperty.Name, shadowProperty.Metadata.Name }, ConfigurationSource.Convention);
+            Assert.NotNull(key);
+
+            Assert.Equal(ConfigurationSource.Convention, entityBuilder.RemoveKey(key.Metadata, ConfigurationSource.DataAnnotation));
+
+            Assert.Equal(1, entityBuilder.Metadata.Properties.Count(p => p.Name == shadowProperty.Metadata.Name));
+            Assert.Empty(entityBuilder.Metadata.Keys.Where(foreignKey => foreignKey.Properties.SequenceEqual(key.Metadata.Properties)));
+        }
+
+        [Fact]
+        public void Removing_key_removes_referencing_foreign_key_of_lower_or_equal_source()
+        {
+            var modelBuilder = CreateModelBuilder();
+            var dependentEntityBuilder = modelBuilder.Entity(typeof(Order), ConfigurationSource.Explicit);
+            var principalEntityBuilder = modelBuilder.Entity(typeof(Customer), ConfigurationSource.Explicit);
+            var key = principalEntityBuilder.Key(new[] { Customer.IdProperty, Customer.UniqueProperty }, ConfigurationSource.Convention);
+            dependentEntityBuilder.Relationship(
+                principalEntityBuilder,
+                dependentEntityBuilder,
+                null,
+                null,
+                new[]
+                {
+                    dependentEntityBuilder.Property(Order.CustomerIdProperty, ConfigurationSource.Convention).Metadata,
+                    dependentEntityBuilder.Property(Order.CustomerUniqueProperty, ConfigurationSource.Convention).Metadata
+                },
+                key.Metadata.Properties,
+                ConfigurationSource.Convention);
+            dependentEntityBuilder.Relationship(
+                principalEntityBuilder,
+                dependentEntityBuilder,
+                null,
+                null,
+                new[]
+                {
+                    dependentEntityBuilder.Property(Order.CustomerIdProperty, ConfigurationSource.Convention).Metadata,
+                    dependentEntityBuilder.Property(Order.CustomerUniqueProperty, ConfigurationSource.Convention).Metadata
+                },
+                key.Metadata.Properties,
+                ConfigurationSource.DataAnnotation);
+
+            Assert.Null(principalEntityBuilder.RemoveKey(key.Metadata, ConfigurationSource.Convention));
+            Assert.Equal(ConfigurationSource.DataAnnotation, principalEntityBuilder.RemoveKey(key.Metadata, ConfigurationSource.DataAnnotation));
+
+            Assert.Equal(
+                new[] { Order.CustomerIdProperty.Name, Order.CustomerUniqueProperty.Name },
+                dependentEntityBuilder.Metadata.Properties.Select(p => p.Name));
+            Assert.Empty(dependentEntityBuilder.Metadata.ForeignKeys);
+            Assert.Empty(principalEntityBuilder.Metadata.Keys);
         }
 
         [Fact]
@@ -558,63 +823,6 @@ namespace Microsoft.Data.Entity.Metadata.Internal
 
             Assert.NotEmpty(entityBuilder.Metadata.Properties.Where(p => p.Name == Order.CustomerIdProperty.Name));
             Assert.NotEmpty(entityBuilder.Metadata.Keys);
-        }
-
-        [Fact]
-        public void Removing_foreign_key_removes_unused_contained_shadow_properties()
-        {
-            var modelBuilder = CreateModelBuilder();
-            modelBuilder
-                .Entity(typeof(Customer), ConfigurationSource.Explicit)
-                .PrimaryKey(new[] { Customer.IdProperty, Customer.UniqueProperty }, ConfigurationSource.Explicit);
-            var entityBuilder = modelBuilder.Entity(typeof(Order), ConfigurationSource.Explicit);
-            var shadowProperty = entityBuilder.Property(typeof(Guid), "Shadow", ConfigurationSource.Convention);
-
-            Assert.NotNull(entityBuilder.ForeignKey(typeof(Customer).FullName, new[] { Order.CustomerIdProperty.Name, shadowProperty.Metadata.Name }, ConfigurationSource.Convention));
-
-            Assert.True(entityBuilder.Ignore(Order.CustomerIdProperty.Name, ConfigurationSource.DataAnnotation));
-
-            Assert.Empty(entityBuilder.Metadata.Properties);
-            Assert.Empty(entityBuilder.Metadata.ForeignKeys);
-        }
-
-        [Fact]
-        public void Removing_foreign_key_does_not_remove_contained_shadow_properties_if_referenced_elsewhere()
-        {
-            Test_removing_foreign_key_does_not_remove_contained_shadow_properties_if_referenced_elsewhere(
-                (entityBuilder, property) => entityBuilder.PrimaryKey(new[] { property.Name }, ConfigurationSource.Convention));
-
-            Test_removing_foreign_key_does_not_remove_contained_shadow_properties_if_referenced_elsewhere(
-                (entityBuilder, property) => entityBuilder.Index(new[] { property.Name }, ConfigurationSource.Convention));
-
-            Test_removing_foreign_key_does_not_remove_contained_shadow_properties_if_referenced_elsewhere(
-                (entityBuilder, property) => entityBuilder.ForeignKey(
-                    typeof(Customer).FullName,
-                    new[] { entityBuilder.Property(typeof(int), "Shadow2", ConfigurationSource.Convention).Metadata.Name, property.Name },
-                    ConfigurationSource.Convention));
-
-            // TODO: Reenable when configuration source is respected
-            //Test_removing_foreign_key_does_not_remove_contained_shadow_properties_if_referenced_elsewhere(
-            //   (entityBuilder, property) => entityBuilder.Property(typeof(Guid), "Shadow", ConfigurationSource.Explicit));
-        }
-
-        private void Test_removing_foreign_key_does_not_remove_contained_shadow_properties_if_referenced_elsewhere(Func<InternalEntityBuilder, Property, object> shadowConfig)
-        {
-            var modelBuilder = CreateModelBuilder();
-            modelBuilder
-                .Entity(typeof(Customer), ConfigurationSource.Explicit)
-                .PrimaryKey(new[] { Customer.IdProperty, Customer.UniqueProperty }, ConfigurationSource.Explicit);
-            var entityBuilder = modelBuilder.Entity(typeof(Order), ConfigurationSource.Explicit);
-            var shadowProperty = entityBuilder.Property(typeof(Guid), "Shadow", ConfigurationSource.Convention);
-            Assert.NotNull(shadowConfig(entityBuilder, shadowProperty.Metadata));
-
-            var fk = entityBuilder.ForeignKey(typeof(Customer).FullName, new[] { Order.CustomerIdProperty.Name, shadowProperty.Metadata.Name }, ConfigurationSource.Convention);
-            Assert.NotNull(fk);
-
-            Assert.True(entityBuilder.Ignore(Order.CustomerIdProperty.Name, ConfigurationSource.DataAnnotation));
-
-            Assert.Equal(1, entityBuilder.Metadata.Properties.Count(p => p.Name == shadowProperty.Metadata.Name));
-            Assert.Empty(entityBuilder.Metadata.ForeignKeys.Where(foreignKey => foreignKey.Properties.SequenceEqual(fk.Metadata.Properties)));
         }
 
         [Fact]
