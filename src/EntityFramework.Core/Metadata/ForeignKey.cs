@@ -133,5 +133,10 @@ namespace Microsoft.Data.Entity.Metadata
         {
             get { return IsRequired ?? DefaultIsRequired; }
         }
+
+        public override string ToString()
+        {
+            return Properties.Select(p => EntityType.Name + "." + p.Name).Join(" ");
+        }
     }
 }
